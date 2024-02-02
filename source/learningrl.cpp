@@ -1,12 +1,13 @@
 #include <cstdio>
 
 #include <raylib/raylib.h>
+#include <raylib/rcamera.h>
 
 #include <varand/varand_types.h>
 #include <varand/varand_util.h>
 #include <varand/varand_raylibhelper.h>
 
-#define PLAYER_SIZE 40
+#define MAX_COLUMNS 20
 
 int main(int argv, char **argc)
 {
@@ -15,122 +16,145 @@ int main(int argv, char **argc)
 
     InitWindow(screenWidth, screenHeight, "Learning");
 
-    Rectangle player1 = GetRectangle(200, 200, PLAYER_SIZE);
-    Rectangle player2 = GetRectangle(250, 200, PLAYER_SIZE);
+    Camera camera = {};
+    camera.position = GetVector3(0.0f, 2.0f, 4.0f);
+    camera.target = GetVector3(0.0f, 2.0f, 0.0f);
+    camera.up = GetVector3(0.0f, 1.0f, 0.0f);
+    camera.fovy = 60.0f;
+    camera.projection = CAMERA_PERSPECTIVE;
 
-    Camera2D camera1 = {};
-    camera1.target = GetRectangleMin(player1);
-    camera1.offset = GetVector2(200.0f, 200.0f);
-    camera1.rotation = 0.0f;
-    camera1.zoom = 1.0f;
+    int cameraMode = CAMERA_FIRST_PERSON;
 
-    Camera2D camera2 = {};
-    camera2.target = GetRectangleMin(player2);
-    camera2.offset = GetVector2(200.0f, 200.0f);
-    camera2.rotation = 0.0f;
-    camera2.zoom = 1.0f;
+    f32 heights[MAX_COLUMNS] = {};
+    Vector3 positions[MAX_COLUMNS] = {};
+    Color colors[MAX_COLUMNS] = {};
 
-    RenderTexture screenCamera1 = LoadRenderTexture(screenWidth / 2, screenHeight);
-    RenderTexture screenCamera2 = LoadRenderTexture(screenWidth / 2, screenHeight);
+    for (int i = 0; i < MAX_COLUMNS; i++)
+    {
+        heights[i] = (f32) GetRandomValue(1, 12);
+        positions[i] = GetVector3((f32) GetRandomValue(-15, 15), heights[i] / 2.0f, (f32) GetRandomValue(-15, 15));
+        colors[i] = GetColor(GetRandomValue(20, 255), GetRandomValue(10, 55), 30);
+    }
 
-    Rectangle splitScreenRect = GetRectangle(0.0f, 0.0f, (f32) screenCamera1.texture.width, (f32) -screenCamera1.texture.height);
+    DisableCursor();
 
     SetTargetFPS(60);
 
     while (!WindowShouldClose())
     {
-        if (IsKeyDown(KEY_S)) player1.y += 3.0f;
-        if (IsKeyDown(KEY_W)) player1.y -= 3.0f;
-        if (IsKeyDown(KEY_D)) player1.x += 3.0f;
-        if (IsKeyDown(KEY_A)) player1.x -= 3.0f;
+        if (IsKeyDown(KEY_ONE))
+        {
+            cameraMode = CAMERA_FREE;
+            camera.up = GetVector3(0.0f, 1.0f, 0.0f); // Reset roll
+        }
 
-        if (IsKeyDown(KEY_DOWN)) player2.y += 3.0f;
-        if (IsKeyDown(KEY_UP)) player2.y -= 3.0f;
-        if (IsKeyDown(KEY_RIGHT)) player2.x += 3.0f;
-        if (IsKeyDown(KEY_LEFT)) player2.x -= 3.0f;
+        if (IsKeyDown(KEY_TWO))
+        {
+            cameraMode = CAMERA_FIRST_PERSON;
+            camera.up = GetVector3(0.0f, 1.0f, 0.0f);
+        }
 
-        camera1.target = GetRectangleMin(player1);
-        camera2.target = GetRectangleMin(player2);
+        if (IsKeyDown(KEY_THREE))
+        {
+            cameraMode = CAMERA_THIRD_PERSON;
+            camera.up = GetVector3(0.0f, 1.0f, 0.0f);
+        }
 
-        BeginTextureMode(screenCamera1);
-            ClearBackground(RAYWHITE);
+        if (IsKeyDown(KEY_FOUR))
+        {
+            cameraMode = CAMERA_ORBITAL;
+            camera.up = GetVector3(0.0f, 1.0f, 0.0f);
+        }
 
-            BeginMode2D(camera1);
+        if (IsKeyPressed(KEY_P))
+        {
+            if (camera.projection == CAMERA_PERSPECTIVE)
+            {
+                cameraMode = CAMERA_THIRD_PERSON;
+                camera.position = GetVector3(0.0f, 2.0f, -100.0f);
+                camera.target = GetVector3(0.0f, 2.0f, 0.0f);
+                camera.up = GetVector3(0.0f, 1.0f, 0.0f);
+                camera.projection = CAMERA_ORTHOGRAPHIC;
+                camera.fovy = 20.0f; // near plane width in CAMERA_ORTHOGRAPHIC
+                CameraYaw(&camera, -135 * DEG2RAD, true);
+                CameraPitch(&camera, -45 * DEG2RAD, true, true, false);
+            }
+            else if (camera.projection == CAMERA_ORTHOGRAPHIC)
+            {
+                cameraMode = CAMERA_THIRD_PERSON;
+                camera.position = GetVector3(0.0f, 2.0f, 10.0f);
+                camera.target = GetVector3(0.0f, 2.0f, 0.0f);
+                camera.up = GetVector3(0.0f, 1.0f, 0.0f);
+                camera.projection = CAMERA_PERSPECTIVE;
+                camera.fovy = 60.0f;
+            }
+        }
 
-                for (int i = 0; i < screenWidth / PLAYER_SIZE + 1; i++)
-                {
-                    DrawLineV(GetVector2((f32) PLAYER_SIZE * i, 0), GetVector2((f32) PLAYER_SIZE * i, (f32) screenHeight), LIGHTGRAY);
-                }
+        // Computes movement internally with some default keyboard/mouse inputs
+        UpdateCamera(&camera, cameraMode);
 
-                for (int i = 0; i < screenHeight / PLAYER_SIZE + 1; i++)
-                {
-                    DrawLineV(GetVector2(0, (f32) PLAYER_SIZE * i), GetVector2((f32) screenWidth, (f32) PLAYER_SIZE * i), LIGHTGRAY);
-                }
-
-                for (int i = 0; i < screenWidth / PLAYER_SIZE; i++)
-                {
-                    for (int j = 0; j < screenHeight / PLAYER_SIZE; j++)
-                    {
-                        DrawText(TextFormat("[%i,%i]", i, j), 10 + PLAYER_SIZE * i, 15 + PLAYER_SIZE*j, 10, LIGHTGRAY);
-                    }
-                }
-
-                DrawRectangleRec(player1, RED);
-                DrawRectangleRec(player2, BLUE);
-
-            EndMode2D();
-
-            DrawRectangle(0, 0, GetScreenWidth() / 2, 30, Fade(RAYWHITE, 0.6f));
-            DrawText("PLAYER1: W/S/A/D to move", 10, 10, 10, MAROON);
-
-        EndTextureMode();
-
-        BeginTextureMode(screenCamera2);
-            ClearBackground(RAYWHITE);
-
-            BeginMode2D(camera2);
-
-                for (int i = 0; i < screenWidth / PLAYER_SIZE + 1; i++)
-                {
-                    DrawLineV(GetVector2((f32) PLAYER_SIZE * i, 0), GetVector2((f32) PLAYER_SIZE * i, (f32) screenHeight), LIGHTGRAY);
-                }
-
-                for (int i = 0; i < screenHeight / PLAYER_SIZE + 1; i++)
-                {
-                    DrawLineV(GetVector2(0, (f32) PLAYER_SIZE * i), GetVector2((f32) screenWidth, (f32) PLAYER_SIZE * i), LIGHTGRAY);
-                }
-
-                for (int i = 0; i < screenWidth / PLAYER_SIZE; i++)
-                {
-                    for (int j = 0; j < screenHeight / PLAYER_SIZE; j++)
-                    {
-                        DrawText(TextFormat("[%i,%i]", i, j), 10 + PLAYER_SIZE * i, 15 + PLAYER_SIZE*j, 10, LIGHTGRAY);
-                    }
-                }
-
-                DrawRectangleRec(player1, RED);
-                DrawRectangleRec(player2, BLUE);
-
-            EndMode2D();
-
-            DrawRectangle(0, 0, GetScreenWidth() / 2, 30, Fade(RAYWHITE, 0.6f));
-            DrawText("PLAYER2: UP/DOWN/LEFT/RIGHT to move", 10, 10, 10, DARKBLUE);
-
-        EndTextureMode();
+        // Custom movement
+        #if 0
+        UpdateCameraPro(&camera,
+                        GetVector3(IsKeyDown(KEY_W) * 0.1f - IsKeyDown(KEY_S) * 0.1f,
+                                   IsKeyDown(KEY_D) * 0.1f - IsKeyDown(KEY_A) * 0.1f,
+                                   0.0f),
+                        GetVector3(GetMouseDelta().x * 0.05f,
+                                   GetMouseDelta().y * 0.05f,
+                                   0.0f),
+                        GetMouseWheelMove() * 2.0f); // Move to target (zoom)
+        #endif
 
         BeginDrawing();
-            ClearBackground(LIGHTGRAY);
+            ClearBackground(RAYWHITE);
 
-            DrawTextureRec(screenCamera1.texture, splitScreenRect, GetVector2(0, 0), WHITE);
-            DrawTextureRec(screenCamera2.texture, splitScreenRect, GetVector2(screenWidth / 2.0f, 0), WHITE);
+            BeginMode3D(camera);
 
-            DrawRectangle(GetScreenWidth() / 2 - 2, 0, 4, GetScreenHeight(), LIGHTGRAY);
+                DrawPlane(GetVector3(), GetVector2(32.0f), LIGHTGRAY);
+                DrawCube(GetVector3(-16.0f, 2.5f), 1.0f, 5.0f, 32.0f, BLUE);
+                DrawCube(GetVector3(16.0f, 2.5f), 1.0f, 5.0f, 32.0f, LIME);
+                DrawCube(GetVector3(0.0f, 2.5f, 16.0f), 32.0f, 5.0f, 1.0f, GOLD);
+
+                for (int i = 0; i < MAX_COLUMNS; i++)
+                {
+                    DrawCube(positions[i], 2.0f, heights[i], 2.0f, colors[i]);
+                    DrawCubeWires(positions[i], 2.0f, heights[i], 2.0f, MAROON);
+                }
+
+                if (cameraMode == CAMERA_THIRD_PERSON)
+                {
+                    DrawCube(camera.target, 0.5f, 0.5f, 0.5f, PURPLE);
+                    DrawCubeWires(camera.target, 0.5f, 0.5f, 0.5f, DARKPURPLE);
+                }
+
+            EndMode3D();
+
+            DrawRectangle(5, 5, 330, 100, Fade(SKYBLUE, 0.5f));
+            DrawRectangleLines(5, 5, 330, 100, BLUE);
+
+            DrawText("Camera controls:", 15, 15, 10, BLACK);
+            DrawText("- Move keys: W, A, S, D, Space, Left-Ctrl", 15, 30, 10, BLACK);
+            DrawText("- Look around: arrow keys or mouse", 15, 45, 10, BLACK);
+            DrawText("- Camera mode keys: 1, 2, 3, 4", 15, 60, 10, BLACK);
+            DrawText("- Zoom keys: num-plus, num-minus or mouse scroll", 15, 75, 10, BLACK);
+            DrawText("- Camera projection key: P", 15, 90, 10, BLACK);
+
+            DrawRectangle(600, 5, 195, 100, Fade(SKYBLUE, 0.5f));
+            DrawRectangleLines(600, 5, 195, 100, BLUE);
+
+            DrawText("Camera status:", 610, 15, 10, BLACK);
+            DrawText(TextFormat("- Mode: %s", (cameraMode == CAMERA_FREE) ? "FREE" :
+                                              (cameraMode == CAMERA_FIRST_PERSON) ? "FIRST_PERSON" :
+                                              (cameraMode == CAMERA_THIRD_PERSON) ? "THIRD_PERSON" :
+                                              (cameraMode == CAMERA_ORBITAL) ? "ORBITAL" : "CUSTOM"), 610, 30, 10, BLACK);
+            DrawText(TextFormat("- Projection: %s", (camera.projection == CAMERA_PERSPECTIVE) ? "PERSPECTIVE" :
+                                                    (camera.projection == CAMERA_ORTHOGRAPHIC) ? "ORTHOGRAPHIC" : "CUSTOM"), 610, 45, 10, BLACK);
+            DrawText(TextFormat("- Position: (%06.3f, %06.3f, %06.3f)", camera.position.x, camera.position.y, camera.position.z), 610, 60, 10, BLACK);
+            DrawText(TextFormat("- Target: (%06.3f, %06.3f, %06.3f)", camera.target.x, camera.target.y, camera.target.z), 610, 75, 10, BLACK);
+            DrawText(TextFormat("- Up: (%06.3f, %06.3f, %06.3f)", camera.up.x, camera.up.y, camera.up.z), 610, 90, 10, BLACK);
 
         EndDrawing();
     }
-
-    UnloadRenderTexture(screenCamera1);
-    UnloadRenderTexture(screenCamera2);
 
     CloseWindow();
 
