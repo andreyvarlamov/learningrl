@@ -13,48 +13,122 @@ int main(int argv, char **argc)
 
     InitWindow(screenWidth, screenHeight, "Learning");
 
-    Camera3D camera = {};
-    camera.position = GetVector3(10.0f);
-    camera.target = GetVector3();
-    camera.up = GetVector3(0.0f, 1.0f, 0.0f);
-    camera.fovy = 45.0f;
-    camera.projection = CAMERA_PERSPECTIVE;
+    Camera cameraPlayer1 = { 0 };
+    cameraPlayer1.fovy = 45.0f;
+    cameraPlayer1.up.y = 1.0f;
+    cameraPlayer1.target.y = 1.0f;
+    cameraPlayer1.position.z = -3.0f;
+    cameraPlayer1.position.y = 1.0f;
 
-    Vector3 cubePosition = GetVector3();
+    RenderTexture screenPlayer1 = LoadRenderTexture(screenWidth/2, screenHeight);
 
-    DisableCursor();
+    Camera cameraPlayer2 = { 0 };
+    cameraPlayer2.fovy = 45.0f;
+    cameraPlayer2.up.y = 1.0f;
+    cameraPlayer2.target.y = 3.0f;
+    cameraPlayer2.position.x = -3.0f;
+    cameraPlayer2.position.y = 3.0f;
+
+    RenderTexture screenPlayer2 = LoadRenderTexture(screenWidth / 2, screenHeight);
+
+    Rectangle splitScreenRect = GetRectangle(0.0f, 0.0f, (float)screenPlayer1.texture.width, (float)-screenPlayer1.texture.height);
+
+    // Grid data
+    int count = 5;
+    float spacing = 4;
 
     SetTargetFPS(60);
 
     while (!WindowShouldClose())
     {
-        // Computes movement internally with some default keyboard/mouse inputs
-        UpdateCamera(&camera, CAMERA_FREE);
+        float offsetThisFrame = 10.0f*GetFrameTime();
 
-        if (IsKeyPressed('Z')) camera.target = GetVector3();
+        if (IsKeyDown(KEY_W))
+        {
+            cameraPlayer1.position.z += offsetThisFrame;
+            cameraPlayer1.target.z += offsetThisFrame;
+        }
+        else if (IsKeyDown(KEY_S))
+        {
+            cameraPlayer1.position.z -= offsetThisFrame;
+            cameraPlayer1.target.z -= offsetThisFrame;
+        }
+
+        if (IsKeyDown(KEY_UP))
+        {
+            cameraPlayer2.position.x += offsetThisFrame;
+            cameraPlayer2.target.x += offsetThisFrame;
+        }
+        else if (IsKeyDown(KEY_DOWN))
+        {
+            cameraPlayer2.position.x -= offsetThisFrame;
+            cameraPlayer2.target.x -= offsetThisFrame;
+        }
+
+        BeginTextureMode(screenPlayer1);
+            ClearBackground(SKYBLUE);
+
+            BeginMode3D(cameraPlayer1);
+            
+                DrawPlane(GetVector3(), GetVector2(50), BEIGE);
+
+                for (float x = -count*spacing; x <= count*spacing; x += spacing)
+                {
+                    for (float z = -count*spacing; z <= count*spacing; z += spacing)
+                    {
+                        DrawCube(GetVector3(x, 1.5f, z), 1, 1, 1, LIME);
+                        DrawCube(GetVector3(x, 0.5f, z), 0.25f, 1, 0.25f, BROWN);
+                    }
+                }
+
+                DrawCube(cameraPlayer1.position, 1, 1, 1, RED);
+                DrawCube(cameraPlayer2.position, 1, 1, 1, BLUE);
+            
+            EndMode3D();
+
+            DrawRectangle(0, 0, GetScreenWidth()/2, 40, Fade(RAYWHITE, 0.8f));
+            DrawText("PLAYER1: W/S to move", 10, 10, 20, MAROON);
+
+        EndTextureMode();
+
+        BeginTextureMode(screenPlayer2);
+            ClearBackground(MAROON);
+
+            BeginMode3D(cameraPlayer2);
+            
+                DrawPlane(GetVector3(), GetVector2(50, 50), BEIGE);
+
+                for (float x = -count*spacing; x <= count*spacing; x += spacing)
+                {
+                    for (float z = -count*spacing; z <= count*spacing; z += spacing)
+                    {
+                        DrawCube(GetVector3(x, 1.5f, z), 1, 1, 1, LIME);
+                        DrawCube(GetVector3(x, 0.5f, z), 0.25f, 1, 0.25f, BROWN);
+                    }
+                }
+
+                DrawCube(cameraPlayer1.position, 1, 1, 1, RED);
+                DrawCube(cameraPlayer2.position, 1, 1, 1, BLUE);
+            
+            EndMode3D();
+
+            DrawRectangle(0, 0, GetScreenWidth()/2, 40, Fade(RAYWHITE, 0.8f));
+            DrawText("PLAYER2: UP/DOWN to move", 10, 10, 20, DARKBLUE);
+
+        EndTextureMode();
 
         BeginDrawing();
             ClearBackground(RAYWHITE);
 
-            BeginMode3D(camera);
-
-                DrawCube(cubePosition, 2.0f, 2.0f, 2.0f, RED);
-                DrawCubeWires(cubePosition, 2.0f, 2.0f, 2.0f, MAROON);
-
-                DrawGrid(10, 1.0f);
-
-            EndMode3D();
-
-            DrawRectangle(10, 10, 320, 93, Fade(SKYBLUE, 0.5f));
-            DrawRectangleLines(10, 10, 320, 93, BLUE);
-
-            DrawText("Free camera default controls:", 20, 20, 10, BLACK);
-            DrawText("- Mouse Wheel to Zoom in-out", 40, 40, 10, DARKGRAY);
-            DrawText("- Mouse Wheel Pressed to Pan", 40, 60, 10, DARKGRAY);
-            DrawText("- Z to zoom to (0, 0, 0)", 40, 80, 10, DARKGRAY);
-
+            DrawTextureRec(screenPlayer1.texture, splitScreenRect, GetVector2(), WHITE);
+            DrawTextureRec(screenPlayer2.texture, splitScreenRect, GetVector2(screenWidth/2.0f, 0), WHITE);
+            
+            DrawRectangle(GetScreenWidth()/2 - 2, 0, 4, GetScreenHeight(), LIGHTGRAY);
         EndDrawing();
     }
+
+    UnloadRenderTexture(screenPlayer1);
+    UnloadRenderTexture(screenPlayer2);
 
     CloseWindow();
 
