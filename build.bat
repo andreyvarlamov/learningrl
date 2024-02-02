@@ -11,7 +11,8 @@ set BuildDir=%RootDir%\build
 set SourceDir=%RootDir%\source
 
 set CompilerOptions=/I%CommonIncludeDir% /MTd /nologo /FC /GR- /Z7 /EHa- /Od /Oi
-set CompilerWarningOptions=/WX /W4 /wd4201 /wd4100 /wd4189 /wd4505
+set CompilerWarningOptions=/WX /W4 /wd4201 /wd4100 /wd4189 /wd4505 /wd4996
+REM TODO Remove 4996 from disabled warnings (deprecated 
 set LinkOptions=/LIBPATH:%CommonLibDir% /INCREMENTAL:NO /OPT:REF /SUBSYSTEM:CONSOLE
 set LinkLibs=raylibdll.lib raylib.lib
 
