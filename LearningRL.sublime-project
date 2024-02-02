@@ -17,9 +17,9 @@
                 },
                 {
                     "name": "Start VS",
-                    "shell_cmd": "pushd $project_path & set CurrProjDir=$project_path & debug & popd"
+                    "shell_cmd": "pushd $project_path & set CurrProjDir=$project_path & debug & popd",
                 }
-            ]
+            ],
         },
         {
             "name": "Build (Terminus)",
@@ -35,15 +35,18 @@
                 },
                 {
                     "name": "Start VS",
-                    "shell_cmd": "pushd $project_path & set CurrProjDir=$project_path & debug & popd"
+                    "shell_cmd": "pushd $project_path & set CurrProjDir=$project_path & debug & popd",
                 }
-            ]
+            ],
         }
     ],
     "folders":
     [
 		{
-			"path": "."
-		}
-	]
+			"path": ".",
+		},
+        {
+			"path": "C:\\dev\\shared\\include\\varand"
+		},
+    ],
 }
