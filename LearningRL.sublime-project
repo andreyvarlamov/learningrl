@@ -1,0 +1,49 @@
+{
+    "build_systems":
+    [
+        // {
+        //     "name": "Env (project)",
+        //     "shell_cmd": "pushd $project_path & setupdevenv & popd"
+        // },
+        {
+            "name": "Build (project)",
+            "shell_cmd": "pushd $project_path & set CurrProjDir=$project_path & build & popd",
+            "file_regex": "^\\s*(\\S*)\\((\\d+)\\):\\s()(.*)",
+            "variants":
+            [
+                {
+                    "name": "Run",
+                    // TODO
+                },
+                {
+                    "name": "Start VS",
+                    "shell_cmd": "pushd $project_path & set CurrProjDir=$project_path & debug & popd"
+                }
+            ]
+        },
+        {
+            "name": "Build (Terminus)",
+            "target": "terminus_open",
+            "cancel": "terminus_cancel_build",
+            "shell_cmd": "pushd $project_path & set CurrProjDir=$project_path & build & popd",
+            "file_regex": "^\\s*(\\S*)\\((\\d+)\\):\\s()(.*)",
+            "variants":
+            [
+                {
+                    "name": "Run",
+                    // TODO
+                },
+                {
+                    "name": "Start VS",
+                    "shell_cmd": "pushd $project_path & set CurrProjDir=$project_path & debug & popd"
+                }
+            ]
+        }
+    ],
+    "folders":
+    [
+		{
+			"path": "."
+		}
+	]
+}
