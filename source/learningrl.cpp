@@ -1,10 +1,29 @@
 #include <cstdio>
 
 #include <raylib/raylib.h>
+#include <raylib/raymath.h>
 
 #include <varand/varand_types.h>
 #include <varand/varand_util.h>
 #include <varand/varand_raylibhelper.h>
+
+#define GRAVITY 400
+#define PLAYER_JUMP_SPD 350.0f
+#define PLAYER_HOR_SPD 200.0f
+
+#define MAX_ENVIRONMENT_ELEMENTS    5
+
+typedef struct Player {
+    Vector2 position;
+    float speed;
+    bool canJump;
+} Player;
+
+typedef struct EnvElement {
+    Rectangle rect;
+    int blocking;
+    Color color;
+} EnvElement;
 
 int main(int argv, char **argc)
 {
@@ -13,79 +32,257 @@ int main(int argv, char **argc)
 
     InitWindow(screenWidth, screenHeight, "Learning");
 
-    Camera camera = { 0 };
-    camera.position = GetVector3(10.0f, 10.0f, 10.0f); // Camera position
-    camera.target = GetVector3(0.0f, 0.0f, 0.0f);      // Camera looking at point
-    camera.up = GetVector3(0.0f, 1.0f, 0.0f);          // Camera up vector (rotation towards target)
-    camera.fovy = 45.0f;                                // Camera field-of-view Y
-    camera.projection = CAMERA_PERSPECTIVE; 
+    Player player = { 0 };
+    player.position = GetVector2(400, 280);
+    player.speed = 0;
+    player.canJump = false;
 
-    Vector3 cubePosition = GetVector3(0.0f, 1.0f, 0.0f);
-    Vector3 cubeSize  = GetVector3(2.0f, 2.0f, 2.0f);
+    EnvElement envElements[MAX_ENVIRONMENT_ELEMENTS] = {
+        { GetRectangle(0, 0, 1000, 400), 0, LIGHTGRAY },
+        { GetRectangle(0, 400, 1000, 200), 1, GRAY },
+        { GetRectangle(300, 200, 400, 10), 1, GRAY },
+        { GetRectangle(250, 300, 100, 10), 1, GRAY },
+        { GetRectangle(650, 300, 100, 10), 1, GRAY }
+    };
 
-    Ray ray = {};
-    RayCollision collision = {};
+    Camera2D camera = { 0 };
+    camera.target = player.position;
+    camera.offset = GetVector2(screenWidth/2.0f, screenHeight/2.0f);
+    camera.rotation = 0.0f;
+    camera.zoom = 1.0f;
 
-    SetTargetFPS(60);
+    AutomationEventList aelist = LoadAutomationEventList(0);  // Initialize list of automation events to record new events
+    SetAutomationEventList(&aelist);
+    bool eventRecording = false;
+    bool eventPlaying = false;
+
+    unsigned int frameCounter = 0;
+    unsigned int playFrameCounter = 0;
+    unsigned int currentPlayEvent = 0;
+
+    f32 frameRate = 60;
+    SetTargetFPS((int) frameRate);
 
     while (!WindowShouldClose())
     {
-        if (IsCursorHidden()) UpdateCamera(&camera, CAMERA_FIRST_PERSON);
+        f32 deltaTime = 1 / frameRate;
 
-        if (IsMouseButtonPressed(MOUSE_BUTTON_RIGHT))
+        if (IsFileDropped())
         {
-            if (IsCursorHidden()) EnableCursor();
-            else DisableCursor();
-        }
+            FilePathList droppedFiles = LoadDroppedFiles();
 
-        if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT))
-        {
-            if (!collision.hit)
+            // Supports loading .rgs style files (text or binary) and .png style palette images
+            if (IsFileExtension(droppedFiles.paths[0], ".txt;.rae"))
             {
-                ray = GetMouseRay(GetMousePosition(), camera);
+                UnloadAutomationEventList(&aelist);
+                aelist = LoadAutomationEventList(droppedFiles.paths[0]);
+                
+                eventRecording = false;
+                
+                // Reset scene state to play
+                eventPlaying = true;
+                playFrameCounter = 0;
+                currentPlayEvent = 0;
+                
+                player.position = GetVector2(400, 280);
+                player.speed = 0;
+                player.canJump = false;
 
-                // Check collision between ray and box
-                collision = GetRayCollisionBox(ray,
-                                               GetBoundingBox(GetVector3(cubePosition.x - cubeSize.x/2,
-                                                                         cubePosition.y - cubeSize.y/2,
-                                                                         cubePosition.z - cubeSize.z/2),
-                                                              GetVector3(cubePosition.x + cubeSize.x/2,
-                                                                         cubePosition.y + cubeSize.y/2,
-                                                                         cubePosition.z + cubeSize.z/2)));
+                camera.target = player.position;
+                camera.offset = GetVector2(screenWidth/2.0f, screenHeight/2.0f);
+                camera.rotation = 0.0f;
+                camera.zoom = 1.0f;
             }
-            else collision.hit = false;
+
+            UnloadDroppedFiles(droppedFiles);   // Unload filepaths from memory
         }
 
-        BeginDrawing();
-            ClearBackground(RAYWHITE);
+        if (IsKeyDown(KEY_LEFT)) player.position.x -= PLAYER_HOR_SPD*deltaTime;
+        if (IsKeyDown(KEY_RIGHT)) player.position.x += PLAYER_HOR_SPD*deltaTime;
+        if (IsKeyDown(KEY_SPACE) && player.canJump)
+        {
+            player.speed = -PLAYER_JUMP_SPD;
+            player.canJump = false;
+        }
 
-            BeginMode3D(camera);
+        int hitObstacle = 0;
+        for (int i = 0; i < MAX_ENVIRONMENT_ELEMENTS; i++)
+        {
+            EnvElement *element = &envElements[i];
+            Vector2 *p = &(player.position);
+            if (element->blocking &&
+                element->rect.x <= p->x &&
+                element->rect.x + element->rect.width >= p->x &&
+                element->rect.y >= p->y &&
+                element->rect.y <= p->y + player.speed*deltaTime)
+            {
+                hitObstacle = 1;
+                player.speed = 0.0f;
+                p->y = element->rect.y;
+            }
+        }
 
-                if (collision.hit)
+        if (!hitObstacle)
+        {
+            player.position.y += player.speed*deltaTime;
+            player.speed += GRAVITY*deltaTime;
+            player.canJump = false;
+        }
+        else player.canJump = true;
+
+        camera.zoom += ((float)GetMouseWheelMove()*0.05f);
+
+        if (camera.zoom > 3.0f) camera.zoom = 3.0f;
+        else if (camera.zoom < 0.25f) camera.zoom = 0.25f;
+
+        if (IsKeyPressed(KEY_R))
+        {
+            // Reset game state
+            player.position = GetVector2(400, 280);
+            player.speed = 0;
+            player.canJump = false;
+
+            camera.target = player.position;
+            camera.offset = GetVector2(screenWidth/2.0f, screenHeight/2.0f);
+            camera.rotation = 0.0f;
+            camera.zoom = 1.0f;
+        }
+
+        camera.target = player.position;
+        camera.offset = GetVector2(screenWidth/2.0f, screenHeight/2.0f);
+        float minX = 1000, minY = 1000, maxX = -1000, maxY = -1000;
+
+        for (int i = 0; i < MAX_ENVIRONMENT_ELEMENTS; i++)
+        {
+            EnvElement *element = &envElements[i];
+            minX = fminf(element->rect.x, minX);
+            maxX = fmaxf(element->rect.x + element->rect.width, maxX);
+            minY = fminf(element->rect.y, minY);
+            maxY = fmaxf(element->rect.y + element->rect.height, maxY);
+        }
+
+        Vector2 max = GetWorldToScreen2D(GetVector2(maxX, maxY), camera);
+        Vector2 min = GetWorldToScreen2D(GetVector2(minX, minY), camera);
+
+        if (max.x < screenWidth) camera.offset.x = screenWidth - (max.x - screenWidth/2);
+        if (max.y < screenHeight) camera.offset.y = screenHeight - (max.y - screenHeight/2);
+        if (min.x > 0) camera.offset.x = screenWidth/2 - min.x;
+        if (min.y > 0) camera.offset.y = screenHeight/2 - min.y;
+
+        if (IsKeyPressed(KEY_S))
+        {
+            if (!eventPlaying)
+            {
+                if (eventRecording)
                 {
-                    DrawCube(cubePosition, cubeSize.x, cubeSize.y, cubeSize.z, RED);
-                    DrawCubeWires(cubePosition, cubeSize.x, cubeSize.y, cubeSize.z, MAROON);
+                    StopAutomationEventRecording();
+                    eventRecording = false;
 
-                    DrawCubeWires(cubePosition, cubeSize.x + 0.2f, cubeSize.y + 0.2f, cubeSize.z + 0.2f, GREEN);
+                    ExportAutomationEventList(aelist, "automation.rae");
+
+                    TraceLog(LOG_INFO, "RECORDED FRAMES: %i", aelist.count);
                 }
                 else
                 {
-                    DrawCube(cubePosition, cubeSize.x, cubeSize.y, cubeSize.z, GRAY);
-                    DrawCubeWires(cubePosition, cubeSize.x, cubeSize.y, cubeSize.z, DARKGRAY);
+                    SetAutomationEventBaseFrame(180);
+                    StartAutomationEventRecording();
+                    eventRecording = true;
+                }
+            }
+        }
+        else if (IsKeyPressed(KEY_A))
+        {
+            if (!eventRecording && (aelist.count > 0))
+            {
+                eventPlaying = true;
+                playFrameCounter = 0;
+                currentPlayEvent = 0;
+
+                player.position = GetVector2(400, 280);
+                player.speed = 0;
+                player.canJump = false;
+
+                camera.target = player.position;
+                camera.offset = GetVector2(screenWidth / 2.0f, screenHeight / 2.0f);
+                camera.rotation = 0.0f;
+                camera.zoom = 1.0f;
+            }
+        }
+
+        if (eventPlaying)
+        {
+            while (playFrameCounter == aelist.events[currentPlayEvent].frame)
+            {
+                TraceLog(LOG_INFO, "PLAYING: PlayFrameCount: %i | currentPlayEvent: %i | Event Frame: %i, param: %i",
+                         playFrameCounter, currentPlayEvent, aelist.events[currentPlayEvent].frame, aelist.events[currentPlayEvent].params[0]);
+
+                PlayAutomationEvent(aelist.events[currentPlayEvent]);
+                currentPlayEvent++;
+
+                if (currentPlayEvent == aelist.count)
+                {
+                    eventPlaying = false;
+                    currentPlayEvent = 0;
+                    playFrameCounter = 0;
+
+                    TraceLog(LOG_INFO, "FINISH PLAYING!");
+                    break;
+                }
+            }
+
+            playFrameCounter++;
+        }
+
+        if (eventRecording || eventPlaying) frameCounter++;
+        else frameCounter = 0;
+
+        BeginDrawing();
+
+            ClearBackground(LIGHTGRAY);
+
+            BeginMode2D(camera);
+
+                // Draw environment elements
+                for (int i = 0; i < MAX_ENVIRONMENT_ELEMENTS; i++)
+                {
+                    DrawRectangleRec(envElements[i].rect, envElements[i].color);
                 }
 
-                DrawRay(ray, MAROON);
-                DrawGrid(10, 1.0f);
+                // Draw player rectangle
+                DrawRectangleRec(GetRectangle(player.position.x - 20, player.position.y - 40, 40, 40), RED);
 
-            EndMode3D();
+            EndMode2D();
+            
+            // Draw game controls
+            DrawRectangle(10, 10, 290, 145, Fade(SKYBLUE, 0.5f));
+            DrawRectangleLines(10, 10, 290, 145, Fade(BLUE, 0.8f));
 
-            DrawText("Try clicking on the box with your mouse!", 240, 10, 20, DARKGRAY);
+            DrawText("Controls:", 20, 20, 10, BLACK);
+            DrawText("- RIGHT | LEFT: Player movement", 30, 40, 10, DARKGRAY);
+            DrawText("- SPACE: Player jump", 30, 60, 10, DARKGRAY);
+            DrawText("- R: Reset game state", 30, 80, 10, DARKGRAY);
 
-            if (collision.hit) DrawText("BOX SELECTED", (screenWidth - MeasureText("BOX SELECTED", 30)) / 2, (int)(screenHeight * 0.1f), 30, GREEN);
+            DrawText("- S: START/STOP RECORDING INPUT EVENTS", 30, 110, 10, BLACK);
+            DrawText("- A: REPLAY LAST RECORDED INPUT EVENTS", 30, 130, 10, BLACK);
 
-            DrawText("Right click mouse to toggle camera controls", 10, 430, 10, GRAY);
+            // Draw automation events recording indicator
+            if (eventRecording)
+            {
+                DrawRectangle(10, 160, 290, 30, Fade(RED, 0.3f));
+                DrawRectangleLines(10, 160, 290, 30, Fade(MAROON, 0.8f));
+                DrawCircle(30, 175, 10, MAROON);
 
-            DrawFPS(10, 10);
+                if (((frameCounter/15)%2) == 1) DrawText(TextFormat("RECORDING EVENTS... [%i]", aelist.count), 50, 170, 10, MAROON);
+            }
+            else if (eventPlaying)
+            {
+                DrawRectangle(10, 160, 290, 30, Fade(LIME, 0.3f));
+                DrawRectangleLines(10, 160, 290, 30, Fade(DARKGREEN, 0.8f));
+                DrawTriangle(GetVector2(20, 155 + 10), GetVector2(20, 155 + 30), GetVector2(40, 155 + 20), DARKGREEN);
+
+                if (((frameCounter/15)%2) == 1) DrawText(TextFormat("PLAYING RECORDED EVENTS... [%i]", currentPlayEvent), 50, 170, 10, DARKGREEN);
+            }
+            
 
         EndDrawing();
     }
