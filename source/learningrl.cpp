@@ -3,202 +3,320 @@
 #include <varand/varand_raylibhelper.h>
 
 #include <raylib/raylib.h>
+#include <raylib/raymath.h>
+#include <raylib/rlgl.h>
 
-#define RAYGUI_IMPLEMENTATION
-#include <raylib/raygui.h>
+// Custom blend modes
+#define RLGL_SRC_ALPHA 0x0302
+#define RLGL_MIN 0x8007
+#define RLGL_MAX 0x8008
 
-//#include <stdlib.h>
+#define MAX_BOXES 20
+#define MAX_SHADOWS MAX_BOXES * 3
+#define MAX_LIGHTS 16
 
-#define MAX_SPLINE_POINTS 32
-
-struct ControlPoint
+struct ShadowGeometry
 {
-    Vector2 start;
-    Vector2 end;
+    Vector2 vertices[4];
 };
 
-enum SplineType
+struct LightInfo
 {
-    SPLINE_LINEAR  = 0,
-    SPLINE_BASIS,
-    SPLINE_CATMULLROM,
-    SPLINE_BEZIER
+    bool active; // Is this light slot active?
+    bool dirty; // Does this light need to be updated?
+    bool valid; // Is this light in a valid position?
+
+    Vector2 position; // Light position
+    RenderTexture mask; // ALpha mask for the light
+    float outerRadius; // The destance the light touches
+    Rectangle bounds; // A cached rectangle of the light bounds to help with culling
+
+    ShadowGeometry shadows[MAX_SHADOWS];
+    int shadowCount;
 };
 
-#define DRAW_INDIVIDUAL 0
+LightInfo lights[MAX_LIGHTS] = {};
+
+// Move a light and mark it as dirty so that we update its mask next frame
+void MoveLight(int slot, float x, float y)
+{
+    lights[slot].dirty = true;
+    lights[slot].position.x = x;
+    lights[slot].position.y = y;
+
+    lights[slot].bounds.x = x - lights[slot].outerRadius;
+    lights[slot].bounds.y = y - lights[slot].outerRadius;
+}
+
+
+// Compute a shadow volume for the edge
+// it takes the edge and projects it back by the light radius and turns it into a quad
+void ComputeShadowVolumeForEdge(int slot, Vector2 sp, Vector2 ep)
+{
+    if (lights[slot].shadowCount >= MAX_SHADOWS) return;
+
+    float extension = lights[slot].outerRadius * 2;
+
+    Vector2 spVector = Vector2Normalize(Vector2Subtract(sp, lights[slot].position));
+    Vector2 spProjection = Vector2Add(sp, Vector2Scale(spVector, extension));
+
+    Vector2 epVector = Vector2Normalize(Vector2Subtract(ep, lights[slot].position));
+    Vector2 epProjection = Vector2Add(ep, Vector2Scale(epVector, extension));
+
+    lights[slot].shadows[lights[slot].shadowCount].vertices[0] = sp;
+    lights[slot].shadows[lights[slot].shadowCount].vertices[1] = ep;
+    lights[slot].shadows[lights[slot].shadowCount].vertices[2] = epProjection;
+    lights[slot].shadows[lights[slot].shadowCount].vertices[3] = spProjection;
+
+    lights[slot].shadowCount++;
+}
+
+void DrawLightMask(int slot)
+{
+    BeginTextureMode(lights[slot].mask);
+        ClearBackground(WHITE);
+
+        // Force the blend mode to only set the alpha of the destination
+        rlSetBlendFactors(RLGL_SRC_ALPHA, RLGL_SRC_ALPHA, RLGL_MIN);
+        rlSetBlendMode(BLEND_CUSTOM);
+
+        if (lights[slot].valid) DrawCircleGradient((int) lights[slot].position.x, (int) lights[slot].position.y, lights[slot].outerRadius, ColorAlpha(WHITE, 0), WHITE);
+
+        rlDrawRenderBatchActive();
+
+        rlSetBlendMode(BLEND_ALPHA);
+        rlSetBlendFactors(RLGL_SRC_ALPHA, RLGL_SRC_ALPHA, RLGL_MAX);
+        rlSetBlendMode(BLEND_CUSTOM);
+
+        // Draw the shadows to the alpha mask
+        for (int i = 0; i < lights[slot].shadowCount; i++)
+        {
+            DrawTriangleFan(lights[slot].shadows[i].vertices, 4, WHITE);
+        }
+
+        rlDrawRenderBatchActive();
+
+        // Go back to normal blend mode
+        rlSetBlendMode(BLEND_ALPHA);
+
+    EndTextureMode();
+}
+
+// Setup a light
+void SetupLight(int slot, float x, float y, float radius)
+{
+    lights[slot].active = true;
+    lights[slot].valid = false;
+    lights[slot].mask = LoadRenderTexture(GetScreenWidth(), GetScreenHeight());
+    lights[slot].outerRadius = radius;
+
+    lights[slot].bounds.width = radius * 2;
+    lights[slot].bounds.height = radius * 2;
+
+    MoveLight(slot, x, y);
+
+    // Force the render texture to have something in it
+    DrawLightMask(slot);
+}
+
+// See if a light needs to update its mask
+bool UpdateLight(int slot, Rectangle *boxes, int count)
+{
+    if (!lights[slot].active || !lights[slot].dirty) return false;
+
+    lights[slot].dirty = false;
+    lights[slot].shadowCount = 0;
+    lights[slot].valid = false;
+
+    for (int i = 0; i < count; i++)
+    {
+        // Is the light in a box? if so it's not valid
+        if (CheckCollisionPointRec(lights[slot].position, boxes[i])) return false;
+
+        // If this box is outside bounds, can skip it
+        if (!CheckCollisionRecs(lights[slot].bounds, boxes[i])) continue;
+
+        // Check the edges that are on the same side the light is, cast shadow volumes from them
+
+        // Top
+        Vector2 sp = GetVector2(boxes[i].x, boxes[i].y);
+        Vector2 ep = GetVector2(boxes[i].x + boxes[i].width, boxes[i].y);
+
+        if (lights[slot].position.y > ep.y) ComputeShadowVolumeForEdge(slot, sp, ep);
+
+        // Right
+        sp = ep;
+        ep.y += boxes[i].height;
+        if (lights[slot].position.x < ep.x) ComputeShadowVolumeForEdge(slot, sp, ep);
+
+        // Bottom
+        sp = ep;
+        ep.x -= boxes[i].width;
+        if (lights[slot].position.y < ep.y) ComputeShadowVolumeForEdge(slot, sp, ep);
+
+        // Left
+        sp = ep;
+        ep.y -= boxes[i].height;
+        if (lights[slot].position.x > ep.x) ComputeShadowVolumeForEdge(slot, sp, ep);
+
+        // The box itself
+        lights[slot].shadows[lights[slot].shadowCount].vertices[0] = GetVector2(boxes[i].x, boxes[i].y);
+        lights[slot].shadows[lights[slot].shadowCount].vertices[1] = GetVector2(boxes[i].x, boxes[i].y + boxes[i].height);
+        lights[slot].shadows[lights[slot].shadowCount].vertices[2] = GetVector2(boxes[i].x + boxes[i].width, boxes[i].y + boxes[i].height);
+        lights[slot].shadows[lights[slot].shadowCount].vertices[3] = GetVector2(boxes[i].x + boxes[i].width, boxes[i].y);
+        lights[slot].shadowCount++;
+    }
+
+    lights[slot].valid = true;
+
+    DrawLightMask(slot);
+
+    return true;
+}
+
+// Set up some boxes
+void SetupBoxes(Rectangle *boxes, int *count)
+{
+    boxes[0] = GetRectangle(150,80, 40, 40);
+    boxes[1] = GetRectangle(1200, 700, 40, 40);
+    boxes[2] = GetRectangle(200, 600, 40, 40);
+    boxes[3] = GetRectangle(1000, 50, 40, 40);
+    boxes[4] = GetRectangle(500, 350, 40, 40);
+
+    for (int i = 5; i < MAX_BOXES; i++)
+    {
+        boxes[i] = GetRectangle((float)GetRandomValue(0,GetScreenWidth()), (float)GetRandomValue(0,GetScreenHeight()), (float)GetRandomValue(10,100), (float)GetRandomValue(10,100));
+    }
+
+    *count = MAX_BOXES;
+}
 
 int main(int argv, char **argc)
 {
     int screenWidth = 800;
     int screenHeight = 600;
 
+
     // Set configuration flags for window creation
-    SetConfigFlags(FLAG_MSAA_4X_HINT);
     InitWindow(screenWidth, screenHeight, "Learning");
 
-    Vector2 points[MAX_SPLINE_POINTS] = {
-        GetVector2(50.0f, 400.0f),
-        GetVector2(160.0f, 220.0f),
-        GetVector2(340.0f, 380.0f),
-        GetVector2(520.0f, 60.0f),
-        GetVector2(710.0f, 260.0f),
-    };
+    // Initialize our 'world' of boxes
+    int boxCount = 0;
+    Rectangle boxes[MAX_BOXES] = { 0 };
+    SetupBoxes(boxes, &boxCount);
 
-    int pointCount = 5;
-    int selectedPoint = -1;
-    int focusedPoint = -1;
-    Vector2 *selectedControlPoint = NULL;
-    Vector2 *focusedControlPoint = NULL;
-    
-    // Cube Bezier control points need additional state
-    ControlPoint control[MAX_SPLINE_POINTS] = {};
-    for (int i = 0; i < pointCount - 1; i++)
-    {
-        control[i].start = GetVector2(points[i].x + 50, points[i].y);
-        control[i].end = GetVector2(points[i + 1].x - 50, points[i + 1].y);
-    }
+    // Create a checkerboard groudn texture
+    Image img = GenImageChecked(64, 64, 32, 32, DARKBROWN, DARKGRAY);
+    Texture2D backgroundTexture = LoadTextureFromImage(img);
+    UnloadImage(img);
 
-    f32 splineThickness = 8.0f;
-    int splineTypeActive = SPLINE_LINEAR;
-    bool splineTypeEditMode = false;
-    bool splineHelpersActive = true;
+    // Create a global light mask to hold all the blended lights
+    RenderTexture lightMask = LoadRenderTexture(GetScreenWidth(), GetScreenHeight());
+
+    // Setup initial light
+    SetupLight(0, 600, 400, 300);
+    int nextLight = 1;
+
+    bool showLines = false;
 
     SetTargetFPS(60);
 
     while (!WindowShouldClose())
     {
-        if (IsMouseButtonPressed(MOUSE_RIGHT_BUTTON) && (pointCount < MAX_SPLINE_POINTS))
+        // Drag light 0
+        if (IsMouseButtonDown(MOUSE_BUTTON_LEFT)) MoveLight(0, GetMousePosition().x, GetMousePosition().y);
+
+        // Make a new light
+        if (IsMouseButtonPressed(MOUSE_BUTTON_RIGHT) && (nextLight < MAX_LIGHTS))
         {
-            points[pointCount] = GetMousePosition();
-            pointCount++;
+            SetupLight(nextLight, GetMousePosition().x, GetMousePosition().y, 200);
+            nextLight++;
         }
 
-        for (int i = 0; i < pointCount; i++)
+        // Toggle debug info
+        if (IsKeyPressed(KEY_F1)) showLines = !showLines;
+
+        // Update the lights and keep track if any were dirty so we know if we need to update the master light mask
+        bool dirtyLights = false;
+        for (int i = 0; i < MAX_LIGHTS; i++)
         {
-            if (CheckCollisionPointCircle(GetMousePosition(), points[i], 8.0f))
-            {
-                focusedPoint = i;
-                if (IsMouseButtonDown(MOUSE_LEFT_BUTTON)) selectedPoint = i;
-                break;
-            }
-            else focusedPoint = -1;
+            if (UpdateLight(i, boxes, boxCount)) dirtyLights = true;
         }
 
-        if (selectedPoint >= 0)
+        // Update the light mask
+        if (dirtyLights)
         {
-            points[selectedPoint] = GetMousePosition();
-            if (IsMouseButtonReleased(MOUSE_LEFT_BUTTON)) selectedPoint = -1;
-        }
+            // Build up the light mask
+            BeginTextureMode(lightMask);
+            
+                ClearBackground(BLACK);
 
-        if ((splineTypeActive == SPLINE_BEZIER) && (focusedPoint == -1))
-        {
-            for (int i = 0; i < pointCount; i++)
-            {
-                if (CheckCollisionPointCircle(GetMousePosition(), control[i].start, 6.0f))
+                // Force the blend mode to only set the alpha of the destination
+                rlSetBlendFactors(RLGL_SRC_ALPHA, RLGL_SRC_ALPHA, RLGL_MIN);
+                rlSetBlendMode(BLEND_CUSTOM);
+
+                // Merge in all the light masks
+                for (int i = 0; i < MAX_LIGHTS; i++)
                 {
-                    focusedControlPoint = &control[i].start;
-                    if (IsMouseButtonDown(MOUSE_LEFT_BUTTON)) selectedControlPoint = &control[i].start;
-                    break;
+                    if (lights[i].active) DrawTextureRec(lights[i].mask.texture, GetRectangle(0, 0, (float)GetScreenWidth(), -(float)GetScreenHeight()), Vector2Zero(), WHITE);
                 }
-                else if (CheckCollisionPointCircle(GetMousePosition(), control[i].end, 6.0f))
-                {
-                    focusedControlPoint = &control[i].end;
-                    if (IsMouseButtonDown(MOUSE_LEFT_BUTTON)) selectedControlPoint = &control[i].end;
-                    break;
-                }
-                else
-                {
-                    focusedControlPoint = NULL;
-                }
-            }
 
-            if (selectedControlPoint != NULL)
-            {
-                *selectedControlPoint = GetMousePosition();
-                if (IsMouseButtonReleased(MOUSE_LEFT_BUTTON)) selectedControlPoint = NULL;
-            }
+                rlDrawRenderBatchActive();
+
+                // Go back to normal blend
+                rlSetBlendMode(BLEND_ALPHA);
+            EndTextureMode();
         }
-
-        if (IsKeyPressed(KEY_ONE)) splineTypeActive = 0;
-        else if (IsKeyPressed(KEY_TWO)) splineTypeActive = 1;
-        else if (IsKeyPressed(KEY_THREE)) splineTypeActive = 2;
-        else if (IsKeyPressed(KEY_FOUR)) splineTypeActive = 3;
 
         BeginDrawing();
-            ClearBackground(RAYWHITE);
 
-            if (splineTypeActive == SPLINE_LINEAR)
+            ClearBackground(BLACK);
+            
+            // Draw the tile background
+            DrawTextureRec(backgroundTexture, GetRectangle(0, 0, (float)GetScreenWidth(), (float)GetScreenHeight()), Vector2Zero(), WHITE);
+            
+            // Overlay the shadows from all the lights
+            DrawTextureRec(lightMask.texture, GetRectangle(0, 0, (float)GetScreenWidth(), -(float)GetScreenHeight()), Vector2Zero(), ColorAlpha(WHITE, showLines? 0.75f : 1.0f));
+
+            // Draw the lights
+            for (int i = 0; i < MAX_LIGHTS; i++)
             {
-                DrawSplineLinear(points, pointCount, splineThickness, RED);
+                if (lights[i].active) DrawCircle((int)lights[i].position.x, (int)lights[i].position.y, 10, (i == 0)? YELLOW : WHITE);
             }
-            else if (splineTypeActive == SPLINE_BASIS)
+
+            if (showLines)
             {
-#if !(DRAW_INDIVIDUAL)
-                DrawSplineBasis(points, pointCount, splineThickness, RED);
-#else
-                for (int i = 0; i < (pointCount - 3); i++)
+                for (int s = 0; s < lights[0].shadowCount; s++)
                 {
-                    // Drawing individual segments, not considering thickness connection compensation
-                    DrawSplineSegmentBasis(points[i], points[i + 1], points[i + 2], points[i + 3], splineThickness, MAROON);
+                    DrawTriangleFan(lights[0].shadows[s].vertices, 4, DARKPURPLE);
                 }
-#endif
-            }
-            else if (splineTypeActive == SPLINE_CATMULLROM)
-            {
-#if !(DRAW_INDIVIDUAL)
-                DrawSplineCatmullRom(points, pointCount, splineThickness, RED);
-#else
-                for (int i = 0; i < (pointCount - 3); i++)
-                {
-                    // Drawing individual segments, not considering thickness connection compensation
-                    DrawSplineSegmentCatmullRom(points[i], points[i + 1], points[i + 2], points[i + 3], splineThickness, MAROON);
-                }   
-#endif
-            }
-            else if (splineTypeActive == SPLINE_BEZIER)
-            {
-                for (int i = 0; i < pointCount - 1; i++)
-                {
-                    DrawSplineSegmentBezierCubic(points[i], control[i].start, control[i].end, points[i + 1], splineThickness, RED);
 
-                    // Control points
-                    DrawCircleV(control[i].start, 6, GOLD);
-                    DrawCircleV(control[i].end, 6, GOLD);
-                    if (focusedControlPoint == &control[i].start) DrawCircleV(control[i].start, 8, GREEN);
-                    else if (focusedControlPoint == &control[i].end) DrawCircleV(control[i].end, 8, GREEN);
-                    DrawLineEx(points[i], control[i].start, 1.0f, LIGHTGRAY);
-                    DrawLineEx(points[i + 1], control[i].end, 1.0f, LIGHTGRAY);
+                for (int b = 0; b < boxCount; b++)
+                {
+                    if (CheckCollisionRecs(boxes[b],lights[0].bounds)) DrawRectangleRec(boxes[b], PURPLE);
 
-                    DrawLineV(points[i], control[i].start, GRAY);
-                    DrawLineV(control[i].end, points[i + 1], GRAY);
+                    DrawRectangleLines((int)boxes[b].x, (int)boxes[b].y, (int)boxes[b].width, (int)boxes[b].height, DARKBLUE);
                 }
-            }
 
-            if (splineHelpersActive)
+                DrawText("(F1) Hide Shadow Volumes", 10, 50, 10, GREEN);
+            }
+            else
             {
-                for (int i = 0; i < pointCount; i++)
-                {
-                    DrawCircleLinesV(points[i], (focusedPoint == i) ? 12.0f : 8.0f, (focusedPoint == i) ? BLUE : DARKBLUE);
-                    if ((splineTypeActive != SPLINE_LINEAR) &&
-                        (splineTypeActive != SPLINE_BEZIER) &&
-                        (i < pointCount - 1)) DrawLineV(points[i], points[i + 1], GRAY);
-
-                    DrawText(TextFormat("[%.0f, %.0f]", points[i].x, points[i].y), (int) points[i].x, (int) points[i].y + 10, 10, BLACK);
-                }
+                DrawText("(F1) Show Shadow Volumes", 10, 50, 10, GREEN);
             }
 
-            if (splineTypeEditMode) GuiLock();
+            DrawFPS(screenWidth - 80, 10);
+            DrawText("Drag to move light #1", 10, 10, 10, DARKGREEN);
+            DrawText("Right click to add new light", 10, 30, 10, DARKGREEN);
 
-            GuiLabel(GetRectangle(12, 62, 140, 24), TextFormat("Spline thickness: %i", (int)splineThickness));
-            GuiSliderBar(GetRectangle(12, 60 + 24, 140, 16), NULL, NULL, &splineThickness, 1.0f, 40.0f);
-
-            GuiCheckBox(GetRectangle(12, 110, 20, 20), "Show point helpers", &splineHelpersActive);
-
-            GuiUnlock();
-
-            GuiLabel(GetRectangle(12, 10, 140, 24), "Spline type:");
-            if (GuiDropdownBox(GetRectangle(12, 8 + 24, 140, 28), "LINEAR;BSPLINE;CATMULLROM;BEZIER", &splineTypeActive, splineTypeEditMode)) splineTypeEditMode = !splineTypeEditMode;
         EndDrawing();
+    }
+
+    UnloadTexture(backgroundTexture);
+    UnloadRenderTexture(lightMask);
+    for (int i = 0; i < MAX_LIGHTS; i++)
+    {
+        if (lights[i].active) UnloadRenderTexture(lights[i].mask);
     }
 
     CloseWindow();
