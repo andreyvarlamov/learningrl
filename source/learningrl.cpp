@@ -6,9 +6,14 @@
 
 #include <cstdio>
 #include <cstdlib>
+#include <atomic>
+#include <ctime>
+#include <thread>
 
-#define MAX_FILEPATH_RECORDED   4096
-#define MAX_FILEPATH_SIZE       2048
+global_variable std::atomic_bool gDataLoaded = false;
+global_variable std::atomic_int gDataProgress = 0;
+
+internal void LoadDataThread();
 
 int main(int argv, char **argc)
 {
@@ -17,63 +22,99 @@ int main(int argv, char **argc)
 
     InitWindow(screenWidth, screenHeight, "Learning");
 
-    int filePathCounter = 0;
-    char *filePaths[MAX_FILEPATH_RECORDED] = { 0 };
+    std::thread loadDataThread;
 
-    for (int i = 0; i < MAX_FILEPATH_RECORDED; i++)
-    {
-        filePaths[i] = (char *)RL_CALLOC(MAX_FILEPATH_SIZE, 1);
-    }
+    enum { STATE_WAITING, STATE_LOADING, STATE_FINISHED } state = STATE_WAITING;
+    int framesCounter = 0;
 
     SetTargetFPS(60);
 
     while (!WindowShouldClose())
     {
-        if (IsFileDropped())
+        switch (state)
         {
-            FilePathList droppedFiles = LoadDroppedFiles();
-
-            for (int i = 0, offset = filePathCounter; i < (int) droppedFiles.count; i++)
+            case STATE_WAITING:
             {
-                if (filePathCounter , (MAX_FILEPATH_RECORDED - 1))
+                if (IsKeyPressed(KEY_ENTER))
                 {
-                    TextCopy(filePaths[offset + i], droppedFiles.paths[i]);
-                    filePathCounter++;
-                }
-            }
+                    loadDataThread = std::thread(LoadDataThread);
+                    TraceLog(LOG_INFO, "Loading thread initialized successfully");
 
-            UnloadDroppedFiles(droppedFiles);
+                    state = STATE_LOADING;
+                }
+            } break;
+
+            case STATE_LOADING:
+            {
+                framesCounter++;
+                if (std::atomic_load_explicit(&gDataLoaded, std::memory_order_relaxed))
+                {
+                    framesCounter = 0;
+                    loadDataThread.join();
+                    TraceLog(LOG_INFO, "Loading thread terminated successfully");
+
+                    state = STATE_FINISHED;
+                }
+            } break;
+
+            case STATE_FINISHED:
+            {
+                if (IsKeyPressed(KEY_ENTER))
+                {
+                    std::atomic_store_explicit(&gDataLoaded, false, std::memory_order_relaxed);
+                    std::atomic_store_explicit(&gDataProgress, 0, std::memory_order_relaxed);
+
+                    state = STATE_WAITING;
+                }
+            } break;
+
+            default: break;
         }
 
         BeginDrawing();
             ClearBackground(RAYWHITE);
 
-            if (filePathCounter == 0) DrawText("Drop your files to this window!", 100, 40, 20, DARKGRAY);
-            else
+            switch (state)
             {
-                DrawText("Dropped files: ", 100, 40, 20, DARKGRAY);
+                case STATE_WAITING: DrawText("PRESS ENTER to START LOADING DATA", 150, 170, 20, DARKGRAY); break;
 
-                for (int i = 0; i < filePathCounter; i++)
+                case STATE_LOADING:
                 {
-                    if (i % 2 == 0) DrawRectangle(0, 85 + 40 * i, screenWidth, 40, Fade(LIGHTGRAY, 0.5f));
-                    else DrawRectangle(0, 85 + 40 * i, screenWidth, 40, Fade(LIGHTGRAY, 0.3f));
+                    DrawRectangle(150, 200, std::atomic_load_explicit(&gDataProgress, std::memory_order_relaxed), 60, SKYBLUE);
+                    if ((framesCounter/15)%2) DrawText("LOADING DATA...", 240, 210, 40, DARKBLUE);
+                } break;
 
-                    DrawText(filePaths[i], 120, 100 + 40 * i, 10, GRAY);
-                }
+                case STATE_FINISHED:
+                {
+                    DrawRectangle(150, 200, 500, 60, LIME);
+                    DrawText("DATA LOADED!", 250, 210, 40, GREEN);
+                } break;
 
-                DrawText("Drop new files...", 100, 110 + 40 * filePathCounter, 20, DARKGRAY);
+                default: break;
             }
 
+            DrawRectangleLines(150, 200, 500, 60, DARKGRAY);
 
         EndDrawing();
-    }
-
-    for (int i = 0; i < MAX_FILEPATH_RECORDED; i++)
-    {
-        RL_FREE(filePaths[i]);
     }
 
     CloseWindow();
 
     return 0;
+}
+
+internal void LoadDataThread()
+{
+    int timeCounter = 0;
+    clock_t prevTime = clock();
+
+    while (timeCounter < 5000)
+    {
+        clock_t currentTime = clock() - prevTime;
+        timeCounter = currentTime*1000/CLOCKS_PER_SEC;
+
+        std::atomic_store_explicit(&gDataProgress, timeCounter/10, std::memory_order_relaxed);
+    }
+
+    std::atomic_store_explicit(&gDataLoaded, true, std::memory_order_relaxed);
 }
