@@ -7,44 +7,62 @@
 int main(int argv, char **argc)
 {
     int screenWidth = 800;
-    int screenHeight = 600;
+    int screenHeight = 450;
 
     InitWindow(screenWidth, screenHeight, "Learning");
 
     // NOTE: Textures must be loaded after window initialization (opengl context is required)
 
-    Texture2D scarfy = LoadTexture("resources/scarfy.png");
+    Image cat = LoadImage("resources/cat.png"); // Load image in RAM
+    ImageCrop(&cat, GetRectangle(100,10,280,380));
+    ImageFlipHorizontal(&cat);
+    ImageResize(&cat, 150, 200);
 
-    int frameWidth = scarfy.width / 6; // first from animated sprite atlas
-    int frameHeight = scarfy.height;
+    Image parrots = LoadImage("resources/parrots.png");
 
-    Rectangle sourceRec = GetRectangle(0.0f, 0.0f, (float) frameWidth, (float) frameHeight);
-    Rectangle destRec = GetRectangle(screenWidth / 2.0f, screenHeight / 2.0f, frameWidth * 2.0f, frameHeight * 2.0f);
+    // Draw one image over the other with a scaling of 1.5f
+    ImageDraw(&parrots,
+              cat,
+              GetRectangle((float) cat.width, (float) cat.height),
+              GetRectangle(30, 40, cat.width * 1.5f, cat.height * 1.5f),
+              WHITE);
+    ImageCrop(&parrots, GetRectangle(0, 50, (float) parrots.width, (float) parrots.height - 100));
 
-    Vector2 origin = GetVector2((float) frameWidth, (float) frameHeight);
+    // Draw on the image witha few image draw methods
+    ImageDrawPixel(&parrots, 10, 10, RAYWHITE);
+    ImageDrawCircleLines(&parrots, 10, 10, 5, RAYWHITE);
+    ImageDrawRectangle(&parrots, 5, 20, 10, 10, RAYWHITE);
 
-    int rotation = 0;
+    UnloadImage(cat); // Unload image from RAM
+
+    // Load custom font for drawing on image
+    Font font = LoadFont("resources/custom_jupiter_crash.png");
+
+    ImageDrawTextEx(&parrots, font, "PARROTS & CAT", GetVector2(300, 230), (float) font.baseSize, -2, WHITE);
+
+    UnloadFont(font);
+
+    Texture2D texture = LoadTextureFromImage(parrots); // Image converted to texture, uploaded to VRAM
+
+    UnloadImage(parrots); // Unload image from RAM
 
     SetTargetFPS(60);
 
     while (!WindowShouldClose())
     {
-        rotation++;
-
         BeginDrawing();
             ClearBackground(RAYWHITE);
-            
-            DrawTexturePro(scarfy, sourceRec, destRec, origin, (float) rotation, WHITE);
+    
+            DrawTexture(texture, screenWidth / 2 - texture.width / 2, screenHeight / 2 - texture.height / 2 - 40, WHITE);
+            DrawRectangleLines(screenWidth / 2 - texture.width / 2, screenHeight / 2 - texture.height / 2 - 40, texture.width, texture.height, DARKGRAY);
 
-            DrawLine((int) destRec.x, 0, (int) destRec.x, screenHeight, GRAY);
-            DrawLine(0, (int) destRec.y, screenWidth, (int) destRec.y, GRAY);
-
-            DrawText("(c) Scarfy sprite by Eiden Marsal", screenWidth - 200, screenHeight - 20, 10, GRAY);
+            DrawText("We are drawing only one texture from various images composed!", 240, 350, 10, DARKGRAY);
+            DrawText("Source images have been cropped, scaled, flipped and copied one over the other.", 190, 370, 10, DARKGRAY);
 
         EndDrawing();
     }
 
-    UnloadTexture(scarfy);
+    UnloadTexture(texture);
 
     CloseWindow();
 
