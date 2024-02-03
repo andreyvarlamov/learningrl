@@ -4,65 +4,163 @@
 
 #include <raylib/raylib.h>
 
-#include <cstdlib>
-#include <cstdio>
-
-#define STORAGE_DATA_FILE "storage.data"
-
-enum StorageData
-{
-    STORAGE_POSITION_SCORE = 0,
-    STORAGE_POSITION_HISCORE = 1
-};
-
-internal b32 SaveStorageValue(u32 position, int value);
-internal int LoadStorageValue(u32 position);
-
 int main(int argv, char **argc)
 {
     int screenWidth = 800;
     int screenHeight = 600;
 
-    InitWindow(screenWidth, screenHeight, "Learning");
+    // Possible window flags
+    /*
+    FLAG_VSYNC_HINT
+    FLAG_FULLSCREEN_MODE    -> not working properly -> wrong scaling!
+    FLAG_WINDOW_RESIZABLE
+    FLAG_WINDOW_UNDECORATED
+    FLAG_WINDOW_TRANSPARENT
+    FLAG_WINDOW_HIDDEN
+    FLAG_WINDOW_MINIMIZED   -> Not supported on window creation
+    FLAG_WINDOW_MAXIMIZED   -> Not supported on window creation
+    FLAG_WINDOW_UNFOCUSED
+    FLAG_WINDOW_TOPMOST
+    FLAG_WINDOW_HIGHDPI     -> errors after minimize-resize, fb size is recalculated
+    FLAG_WINDOW_ALWAYS_RUN
+    FLAG_MSAA_4X_HINT
+    */
 
-    int score = 0;
-    int hiscore = 0;
+    // Set configuration flags for window creation
+    SetConfigFlags(FLAG_VSYNC_HINT | FLAG_MSAA_4X_HINT | FLAG_WINDOW_HIGHDPI);
+    InitWindow(screenWidth, screenHeight, "Learning");
+    SetWindowState(FLAG_BORDERLESS_WINDOWED_MODE);
+    ClearWindowState(FLAG_WINDOW_TOPMOST);
+
+    Vector2 ballPosition = { GetScreenWidth() / 2.0f, GetScreenHeight() / 2.0f };
+    Vector2 ballSpeed = { 5.0f, 4.0f };
+    float ballRadius = 20;
+
     int framesCounter = 0;
 
-    SetTargetFPS(60);
+    // SetTargetFPS(60);
 
     while (!WindowShouldClose())
     {
+        if (IsKeyPressed(KEY_F)) ToggleFullscreen();  // modifies window size when scaling!
+
         if (IsKeyPressed(KEY_R))
         {
-            score = GetRandomValue(1000, 2000);
-            hiscore = GetRandomValue(2000, 4000);
+            if (IsWindowState(FLAG_WINDOW_RESIZABLE)) ClearWindowState(FLAG_WINDOW_RESIZABLE);
+            else SetWindowState(FLAG_WINDOW_RESIZABLE);
         }
 
-        if (IsKeyPressed(KEY_ENTER))
+        if (IsKeyPressed(KEY_D))
         {
-            SaveStorageValue(STORAGE_POSITION_SCORE, score);
-            SaveStorageValue(STORAGE_POSITION_HISCORE, hiscore);
-        }
-        else if (IsKeyPressed(KEY_SPACE))
-        {
-            score = LoadStorageValue(STORAGE_POSITION_SCORE);
-            hiscore = LoadStorageValue(STORAGE_POSITION_HISCORE);
+            if (IsWindowState(FLAG_WINDOW_UNDECORATED)) ClearWindowState(FLAG_WINDOW_UNDECORATED);
+            else SetWindowState(FLAG_WINDOW_UNDECORATED);
         }
 
-        framesCounter++;
+        if (IsKeyPressed(KEY_H))
+        {
+            if (!IsWindowState(FLAG_WINDOW_HIDDEN)) SetWindowState(FLAG_WINDOW_HIDDEN);
+
+            framesCounter = 0;
+        }
+
+        if (IsWindowState(FLAG_WINDOW_HIDDEN))
+        {
+            framesCounter++;
+            if (framesCounter >= 240) ClearWindowState(FLAG_WINDOW_HIDDEN); // Show window after 3 seconds
+        }
+
+        if (IsKeyPressed(KEY_N))
+        {
+            if (!IsWindowState(FLAG_WINDOW_MINIMIZED)) MinimizeWindow();
+
+            framesCounter = 0;
+        }
+
+        if (IsWindowState(FLAG_WINDOW_MINIMIZED))
+        {
+            framesCounter++;
+            if (framesCounter >= 240) RestoreWindow(); // Restore window after 3 seconds
+        }
+
+        if (IsKeyPressed(KEY_M))
+        {
+            // NOTE: Requires FLAG_WINDOW_RESIZABLE enabled!
+            if (IsWindowState(FLAG_WINDOW_MAXIMIZED)) RestoreWindow();
+            else MaximizeWindow();
+        }
+
+        if (IsKeyPressed(KEY_U))
+        {
+            if (IsWindowState(FLAG_WINDOW_UNFOCUSED)) ClearWindowState(FLAG_WINDOW_UNFOCUSED);
+            else SetWindowState(FLAG_WINDOW_UNFOCUSED);
+        }
+
+        if (IsKeyPressed(KEY_T))
+        {
+            if (IsWindowState(FLAG_WINDOW_TOPMOST)) ClearWindowState(FLAG_WINDOW_TOPMOST);
+            else SetWindowState(FLAG_WINDOW_TOPMOST);
+        }
+
+        if (IsKeyPressed(KEY_A))
+        {
+            if (IsWindowState(FLAG_WINDOW_ALWAYS_RUN)) ClearWindowState(FLAG_WINDOW_ALWAYS_RUN);
+            else SetWindowState(FLAG_WINDOW_ALWAYS_RUN);
+        }
+
+        if (IsKeyPressed(KEY_V))
+        {
+            if (IsWindowState(FLAG_VSYNC_HINT)) ClearWindowState(FLAG_VSYNC_HINT);
+            else SetWindowState(FLAG_VSYNC_HINT);
+        }
+
+        ballPosition.x += ballSpeed.x;
+        ballPosition.y += ballSpeed.y;
+        if ((ballPosition.x >= (GetScreenWidth() - ballRadius)) || (ballPosition.x <= ballRadius)) ballSpeed.x *= -1.0f;
+        if ((ballPosition.y >= (GetScreenHeight() - ballRadius)) || (ballPosition.y <= ballRadius)) ballSpeed.y *= -1.0f;
 
         BeginDrawing();
-            ClearBackground(RAYWHITE);
+            if (IsWindowState(FLAG_WINDOW_TRANSPARENT)) ClearBackground(BLANK);
+            else ClearBackground(RAYWHITE);
 
-            DrawText(TextFormat("SCORE: %i", score), 280, 130, 40, MAROON);
-            DrawText(TextFormat("HI-SCORE: %i", hiscore), 210, 200, 50, BLACK);
+            DrawCircleV(ballPosition, ballRadius, MAROON);
+            DrawRectangleLinesEx(GetRectangle(0, 0, (float)GetScreenWidth(), (float)GetScreenHeight()), 4, RAYWHITE);
 
-            DrawText(TextFormat("frames: %i", framesCounter), 10, 10, 20, LIME);
+            DrawCircleV(GetMousePosition(), 10, DARKBLUE);
 
-            DrawText("Press R togenerate random numbers", 220, 40, 20, LIGHTGRAY);
-            DrawText("Press ENTER to SAVE values", 250, 310, 20, LIGHTGRAY);
-            DrawText("Press SPACE to LOAD values", 252, 350, 20, LIGHTGRAY);
+            DrawFPS(10, 10);
+
+            DrawText(TextFormat("Screen Size: [%i, %i]", GetScreenWidth(), GetScreenHeight()), 10, 40, 10, GREEN);
+
+            // Draw window state info
+            DrawText("Following flags can be set after window creation:", 10, 60, 10, GRAY);
+            if (IsWindowState(FLAG_FULLSCREEN_MODE)) DrawText("[F] FLAG_FULLSCREEN_MODE: on", 10, 80, 10, LIME);
+            else DrawText("[F] FLAG_FULLSCREEN_MODE: off", 10, 80, 10, MAROON);
+            if (IsWindowState(FLAG_WINDOW_RESIZABLE)) DrawText("[R] FLAG_WINDOW_RESIZABLE: on", 10, 100, 10, LIME);
+            else DrawText("[R] FLAG_WINDOW_RESIZABLE: off", 10, 100, 10, MAROON);
+            if (IsWindowState(FLAG_WINDOW_UNDECORATED)) DrawText("[D] FLAG_WINDOW_UNDECORATED: on", 10, 120, 10, LIME);
+            else DrawText("[D] FLAG_WINDOW_UNDECORATED: off", 10, 120, 10, MAROON);
+            if (IsWindowState(FLAG_WINDOW_HIDDEN)) DrawText("[H] FLAG_WINDOW_HIDDEN: on", 10, 140, 10, LIME);
+            else DrawText("[H] FLAG_WINDOW_HIDDEN: off", 10, 140, 10, MAROON);
+            if (IsWindowState(FLAG_WINDOW_MINIMIZED)) DrawText("[N] FLAG_WINDOW_MINIMIZED: on", 10, 160, 10, LIME);
+            else DrawText("[N] FLAG_WINDOW_MINIMIZED: off", 10, 160, 10, MAROON);
+            if (IsWindowState(FLAG_WINDOW_MAXIMIZED)) DrawText("[M] FLAG_WINDOW_MAXIMIZED: on", 10, 180, 10, LIME);
+            else DrawText("[M] FLAG_WINDOW_MAXIMIZED: off", 10, 180, 10, MAROON);
+            if (IsWindowState(FLAG_WINDOW_UNFOCUSED)) DrawText("[G] FLAG_WINDOW_UNFOCUSED: on", 10, 200, 10, LIME);
+            else DrawText("[U] FLAG_WINDOW_UNFOCUSED: off", 10, 200, 10, MAROON);
+            if (IsWindowState(FLAG_WINDOW_TOPMOST)) DrawText("[T] FLAG_WINDOW_TOPMOST: on", 10, 220, 10, LIME);
+            else DrawText("[T] FLAG_WINDOW_TOPMOST: off", 10, 220, 10, MAROON);
+            if (IsWindowState(FLAG_WINDOW_ALWAYS_RUN)) DrawText("[A] FLAG_WINDOW_ALWAYS_RUN: on", 10, 240, 10, LIME);
+            else DrawText("[A] FLAG_WINDOW_ALWAYS_RUN: off", 10, 240, 10, MAROON);
+            if (IsWindowState(FLAG_VSYNC_HINT)) DrawText("[V] FLAG_VSYNC_HINT: on", 10, 260, 10, LIME);
+            else DrawText("[V] FLAG_VSYNC_HINT: off", 10, 260, 10, MAROON);
+
+            DrawText("Following flags can only be set before window creation:", 10, 300, 10, GRAY);
+            if (IsWindowState(FLAG_WINDOW_HIGHDPI)) DrawText("FLAG_WINDOW_HIGHDPI: on", 10, 320, 10, LIME);
+            else DrawText("FLAG_WINDOW_HIGHDPI: off", 10, 320, 10, MAROON);
+            if (IsWindowState(FLAG_WINDOW_TRANSPARENT)) DrawText("FLAG_WINDOW_TRANSPARENT: on", 10, 340, 10, LIME);
+            else DrawText("FLAG_WINDOW_TRANSPARENT: off", 10, 340, 10, MAROON);
+            if (IsWindowState(FLAG_MSAA_4X_HINT)) DrawText("FLAG_MSAA_4X_HINT: on", 10, 360, 10, LIME);
+            else DrawText("FLAG_MSAA_4X_HINT: off", 10, 360, 10, MAROON);
 
         EndDrawing();
     }
@@ -70,143 +168,4 @@ int main(int argv, char **argc)
     CloseWindow();
 
     return 0;
-}
-
-#define TRACELOG TraceLog
-internal b32 SaveStorageValue(u32 position, int value)
-{
-    b32 success = false;
-    int dataSize = 0;
-    u32 newDataSize = 0;
-#if 0
-    // For some reason there's a problem with this function, its allocation is invalid, and even freeing it right away
-    // causes an issue
-    // I used the version of LoadFileData from a commit from the 5.0 release and it works.
-    // https://github.com/raysan5/raylib/blob/ae50bfa2cc569c0f8d5bc4315d39db64005b1b08/src/utils.c
-    // u8 *fileData = LoadFileData(STORAGE_DATA_FILE, &dataSize);
-    // RL_FREE(fileData);
-#else
-    const char *fileName = STORAGE_DATA_FILE;
-    u8 *fileData = 0;
-
-    FILE *file = fopen(fileName, "rb");
-
-    if (file != NULL)
-    {
-        // WARNING: On binary streams SEEK_END could not be found,
-        // using fseek() and ftell() could not work in some (rare) cases
-        fseek(file, 0, SEEK_END);
-        int size = ftell(file);     // WARNING: ftell() returns 'long int', maximum size returned is INT_MAX (2147483647 bytes)
-        fseek(file, 0, SEEK_SET);
-
-        if (size > 0)
-        {
-            fileData = (unsigned char *)RL_MALLOC(size*sizeof(unsigned char));
-
-            if (fileData != NULL)
-            {
-                // NOTE: fread() returns number of read elements instead of bytes, so we read [1 byte, size elements]
-                size_t count = fread(fileData, sizeof(unsigned char), size, file);
-                
-                // WARNING: fread() returns a size_t value, usually 'unsigned int' (32bit compilation) and 'unsigned long long' (64bit compilation)
-                // dataSize is unified along raylib as a 'int' type, so, for file-sizes > INT_MAX (2147483647 bytes) we have a limitation
-                if (count > 2147483647)
-                {
-                    TRACELOG(LOG_WARNING, "FILEIO: [%s] File is bigger than 2147483647 bytes, avoid using LoadFileData()", fileName);
-                    
-                    RL_FREE(fileData);
-                    fileData = NULL;
-                }
-                else
-                {
-                    dataSize = (int)count;
-
-                    if (dataSize != size) TRACELOG(LOG_WARNING, "FILEIO: [%s] File partially loaded (%i bytes out of %i)", fileName, dataSize, count);
-                    else TRACELOG(LOG_INFO, "FILEIO: [%s] File loaded successfully", fileName);
-                }
-            }
-            else TRACELOG(LOG_WARNING, "FILEIO: [%s] Failed to allocated memory for file reading", fileName);
-        }
-        else TRACELOG(LOG_WARNING, "FILEIO: [%s] Failed to read file", fileName);
-
-        fclose(file);
-    }
-    else TRACELOG(LOG_WARNING, "FILEIO: [%s] Failed to open file", fileName);
-#endif
-
-    u8 *newFileData = NULL;
-
-    if (fileData != NULL)
-    {
-        if (dataSize <= ((int) position * sizeof(int)))
-        {
-            newDataSize = (position + 1) * sizeof(int);
-            newFileData = (u8 *) RL_REALLOC(fileData, newDataSize);
-
-            if (newFileData != NULL)
-            {
-                // realloc succeeded
-                int *dataPtr = (int *) newFileData;
-                dataPtr[position] = value;
-            }
-            else
-            {
-                // realloc failed
-                TraceLog(LOG_WARNING, "FILEIO: [%s] Failed to realloc data (%u), position in bytes (%u) bigger than actual file size", STORAGE_DATA_FILE, dataSize, position * sizeof(int));
-
-                newFileData = fileData;
-                newDataSize = dataSize;
-            }
-        }
-        else
-        {
-            newFileData = fileData;
-            newDataSize = dataSize;
-
-            int *dataPtr = (int *)newFileData;
-            dataPtr[position] = value;
-        }
-
-        success = SaveFileData(STORAGE_DATA_FILE, newFileData, newDataSize);
-        RL_FREE(newFileData);
-    }
-    else
-    {
-        TraceLog(LOG_INFO, "FILEIO: [%s] File created successfully", STORAGE_DATA_FILE);
-
-        dataSize = (position + 1) * sizeof(int);
-        fileData = (u8 *) RL_MALLOC(dataSize);
-        int *dataPtr = (int *)fileData;
-        dataPtr[position] = value;
-
-        success = SaveFileData(STORAGE_DATA_FILE, fileData, dataSize);
-        RL_FREE(fileData);
-
-        TraceLog(LOG_INFO, "FILEIO: [%s] Saved storage value: %i", STORAGE_DATA_FILE, value);
-    }
-
-    return success;
-}
-
-int LoadStorageValue(u32 position)
-{
-    int value = 0;
-    int dataSize = 0;
-    u8 *fileData = LoadFileData(STORAGE_DATA_FILE, &dataSize);
-
-    if (fileData != NULL)
-    {
-        if (dataSize < ((int) position * 4)) TraceLog(LOG_WARNING, "FILEIO: [%s] Failed to find storage position: %i", STORAGE_DATA_FILE, position);
-        else
-        {
-            int *dataPtr = (int *) fileData;
-            value = dataPtr[position];
-        }
-
-        UnloadFileData(fileData);
-
-        TraceLog(LOG_INFO, "FILEIO: [%s] Loaded storage value: %i", STORAGE_DATA_FILE, value);
-    }
-
-    return value;
 }
