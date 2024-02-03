@@ -4,16 +4,19 @@
 
 #include <raylib/raylib.h>
 
-#include <cstdio>
 #include <cstdlib>
-#include <atomic>
-#include <ctime>
-#include <thread>
+#include <cstdio>
 
-global_variable std::atomic_bool gDataLoaded = false;
-global_variable std::atomic_int gDataProgress = 0;
+#define STORAGE_DATA_FILE "storage.data"
 
-internal void LoadDataThread();
+enum StorageData
+{
+    STORAGE_POSITION_SCORE = 0,
+    STORAGE_POSITION_HISCORE = 1
+};
+
+internal b32 SaveStorageValue(u32 position, int value);
+internal int LoadStorageValue(u32 position);
 
 int main(int argv, char **argc)
 {
@@ -22,78 +25,44 @@ int main(int argv, char **argc)
 
     InitWindow(screenWidth, screenHeight, "Learning");
 
-    std::thread loadDataThread;
-
-    enum { STATE_WAITING, STATE_LOADING, STATE_FINISHED } state = STATE_WAITING;
+    int score = 0;
+    int hiscore = 0;
     int framesCounter = 0;
 
     SetTargetFPS(60);
 
     while (!WindowShouldClose())
     {
-        switch (state)
+        if (IsKeyPressed(KEY_R))
         {
-            case STATE_WAITING:
-            {
-                if (IsKeyPressed(KEY_ENTER))
-                {
-                    loadDataThread = std::thread(LoadDataThread);
-                    TraceLog(LOG_INFO, "Loading thread initialized successfully");
-
-                    state = STATE_LOADING;
-                }
-            } break;
-
-            case STATE_LOADING:
-            {
-                framesCounter++;
-                if (std::atomic_load_explicit(&gDataLoaded, std::memory_order_relaxed))
-                {
-                    framesCounter = 0;
-                    loadDataThread.join();
-                    TraceLog(LOG_INFO, "Loading thread terminated successfully");
-
-                    state = STATE_FINISHED;
-                }
-            } break;
-
-            case STATE_FINISHED:
-            {
-                if (IsKeyPressed(KEY_ENTER))
-                {
-                    std::atomic_store_explicit(&gDataLoaded, false, std::memory_order_relaxed);
-                    std::atomic_store_explicit(&gDataProgress, 0, std::memory_order_relaxed);
-
-                    state = STATE_WAITING;
-                }
-            } break;
-
-            default: break;
+            score = GetRandomValue(1000, 2000);
+            hiscore = GetRandomValue(2000, 4000);
         }
+
+        if (IsKeyPressed(KEY_ENTER))
+        {
+            SaveStorageValue(STORAGE_POSITION_SCORE, score);
+            SaveStorageValue(STORAGE_POSITION_HISCORE, hiscore);
+        }
+        else if (IsKeyPressed(KEY_SPACE))
+        {
+            score = LoadStorageValue(STORAGE_POSITION_SCORE);
+            hiscore = LoadStorageValue(STORAGE_POSITION_HISCORE);
+        }
+
+        framesCounter++;
 
         BeginDrawing();
             ClearBackground(RAYWHITE);
 
-            switch (state)
-            {
-                case STATE_WAITING: DrawText("PRESS ENTER to START LOADING DATA", 150, 170, 20, DARKGRAY); break;
+            DrawText(TextFormat("SCORE: %i", score), 280, 130, 40, MAROON);
+            DrawText(TextFormat("HI-SCORE: %i", hiscore), 210, 200, 50, BLACK);
 
-                case STATE_LOADING:
-                {
-                    DrawRectangle(150, 200, std::atomic_load_explicit(&gDataProgress, std::memory_order_relaxed), 60, SKYBLUE);
-                    if ((framesCounter/15)%2) DrawText("LOADING DATA...", 240, 210, 40, DARKBLUE);
-                } break;
+            DrawText(TextFormat("frames: %i", framesCounter), 10, 10, 20, LIME);
 
-                case STATE_FINISHED:
-                {
-                    DrawRectangle(150, 200, 500, 60, LIME);
-                    DrawText("DATA LOADED!", 250, 210, 40, GREEN);
-                } break;
-
-                default: break;
-            }
-
-            DrawRectangleLines(150, 200, 500, 60, DARKGRAY);
+            DrawText("Press R togenerate random numbers", 220, 40, 20, LIGHTGRAY);
+            DrawText("Press ENTER to SAVE values", 250, 310, 20, LIGHTGRAY);
+            DrawText("Press SPACE to LOAD values", 252, 350, 20, LIGHTGRAY);
 
         EndDrawing();
     }
@@ -103,18 +72,141 @@ int main(int argv, char **argc)
     return 0;
 }
 
-internal void LoadDataThread()
+#define TRACELOG TraceLog
+internal b32 SaveStorageValue(u32 position, int value)
 {
-    int timeCounter = 0;
-    clock_t prevTime = clock();
+    b32 success = false;
+    int dataSize = 0;
+    u32 newDataSize = 0;
+#if 0
+    // For some reason there's a problem with this function, its allocation is invalid, and even freeing it right away
+    // causes an issue
+    // I used the version of LoadFileData from a commit from the 5.0 release and it works.
+    // https://github.com/raysan5/raylib/blob/ae50bfa2cc569c0f8d5bc4315d39db64005b1b08/src/utils.c
+    // u8 *fileData = LoadFileData(STORAGE_DATA_FILE, &dataSize);
+    // RL_FREE(fileData);
+#else
+    const char *fileName = STORAGE_DATA_FILE;
+    u8 *fileData = 0;
 
-    while (timeCounter < 5000)
+    FILE *file = fopen(fileName, "rb");
+
+    if (file != NULL)
     {
-        clock_t currentTime = clock() - prevTime;
-        timeCounter = currentTime*1000/CLOCKS_PER_SEC;
+        // WARNING: On binary streams SEEK_END could not be found,
+        // using fseek() and ftell() could not work in some (rare) cases
+        fseek(file, 0, SEEK_END);
+        int size = ftell(file);     // WARNING: ftell() returns 'long int', maximum size returned is INT_MAX (2147483647 bytes)
+        fseek(file, 0, SEEK_SET);
 
-        std::atomic_store_explicit(&gDataProgress, timeCounter/10, std::memory_order_relaxed);
+        if (size > 0)
+        {
+            fileData = (unsigned char *)RL_MALLOC(size*sizeof(unsigned char));
+
+            if (fileData != NULL)
+            {
+                // NOTE: fread() returns number of read elements instead of bytes, so we read [1 byte, size elements]
+                size_t count = fread(fileData, sizeof(unsigned char), size, file);
+                
+                // WARNING: fread() returns a size_t value, usually 'unsigned int' (32bit compilation) and 'unsigned long long' (64bit compilation)
+                // dataSize is unified along raylib as a 'int' type, so, for file-sizes > INT_MAX (2147483647 bytes) we have a limitation
+                if (count > 2147483647)
+                {
+                    TRACELOG(LOG_WARNING, "FILEIO: [%s] File is bigger than 2147483647 bytes, avoid using LoadFileData()", fileName);
+                    
+                    RL_FREE(fileData);
+                    fileData = NULL;
+                }
+                else
+                {
+                    dataSize = (int)count;
+
+                    if (dataSize != size) TRACELOG(LOG_WARNING, "FILEIO: [%s] File partially loaded (%i bytes out of %i)", fileName, dataSize, count);
+                    else TRACELOG(LOG_INFO, "FILEIO: [%s] File loaded successfully", fileName);
+                }
+            }
+            else TRACELOG(LOG_WARNING, "FILEIO: [%s] Failed to allocated memory for file reading", fileName);
+        }
+        else TRACELOG(LOG_WARNING, "FILEIO: [%s] Failed to read file", fileName);
+
+        fclose(file);
+    }
+    else TRACELOG(LOG_WARNING, "FILEIO: [%s] Failed to open file", fileName);
+#endif
+
+    u8 *newFileData = NULL;
+
+    if (fileData != NULL)
+    {
+        if (dataSize <= ((int) position * sizeof(int)))
+        {
+            newDataSize = (position + 1) * sizeof(int);
+            newFileData = (u8 *) RL_REALLOC(fileData, newDataSize);
+
+            if (newFileData != NULL)
+            {
+                // realloc succeeded
+                int *dataPtr = (int *) newFileData;
+                dataPtr[position] = value;
+            }
+            else
+            {
+                // realloc failed
+                TraceLog(LOG_WARNING, "FILEIO: [%s] Failed to realloc data (%u), position in bytes (%u) bigger than actual file size", STORAGE_DATA_FILE, dataSize, position * sizeof(int));
+
+                newFileData = fileData;
+                newDataSize = dataSize;
+            }
+        }
+        else
+        {
+            newFileData = fileData;
+            newDataSize = dataSize;
+
+            int *dataPtr = (int *)newFileData;
+            dataPtr[position] = value;
+        }
+
+        success = SaveFileData(STORAGE_DATA_FILE, newFileData, newDataSize);
+        RL_FREE(newFileData);
+    }
+    else
+    {
+        TraceLog(LOG_INFO, "FILEIO: [%s] File created successfully", STORAGE_DATA_FILE);
+
+        dataSize = (position + 1) * sizeof(int);
+        fileData = (u8 *) RL_MALLOC(dataSize);
+        int *dataPtr = (int *)fileData;
+        dataPtr[position] = value;
+
+        success = SaveFileData(STORAGE_DATA_FILE, fileData, dataSize);
+        RL_FREE(fileData);
+
+        TraceLog(LOG_INFO, "FILEIO: [%s] Saved storage value: %i", STORAGE_DATA_FILE, value);
     }
 
-    std::atomic_store_explicit(&gDataLoaded, true, std::memory_order_relaxed);
+    return success;
+}
+
+int LoadStorageValue(u32 position)
+{
+    int value = 0;
+    int dataSize = 0;
+    u8 *fileData = LoadFileData(STORAGE_DATA_FILE, &dataSize);
+
+    if (fileData != NULL)
+    {
+        if (dataSize < ((int) position * 4)) TraceLog(LOG_WARNING, "FILEIO: [%s] Failed to find storage position: %i", STORAGE_DATA_FILE, position);
+        else
+        {
+            int *dataPtr = (int *) fileData;
+            value = dataPtr[position];
+        }
+
+        UnloadFileData(fileData);
+
+        TraceLog(LOG_INFO, "FILEIO: [%s] Loaded storage value: %i", STORAGE_DATA_FILE, value);
+    }
+
+    return value;
 }
