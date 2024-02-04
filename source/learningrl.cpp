@@ -4,6 +4,33 @@
 
 #include <raylib/raylib.h>
 
+#include <cmath>
+
+global_variable float gExponent = 1.0f; // Audio exponentiation value
+global_variable float averageVolume[400] = {}; // Average volume history
+
+void ProcessAudio(void *buffer, u32 frames)
+{
+    float *samples = (float *) buffer;
+    float average = 0.0f;
+
+    for (u32 frame = 0; frame < frames; frame++)
+    {
+        float *left = &samples[frame * 2 + 0], *right = &samples[frame * 2 + 1];
+
+        *left = powf(fabsf(*left), gExponent) * ((*left < 0.0f) ? -1.0f : 1.0f);
+        *right = powf(fabsf(*right), gExponent) * ((*right < 0.0f) ? -1.0f : 1.0f);
+
+        average += fabsf(*left) / frames;
+        average += fabsf(*right) / frames;
+    }
+
+    // Moving history to the left
+    for (int i = 0; i < 399; i++) averageVolume[i] = averageVolume[i + 1];
+
+    averageVolume[399] = average;
+}
+
 int main(int argv, char **argc)
 {
     int screenWidth = 800;
@@ -11,58 +38,54 @@ int main(int argv, char **argc)
 
     InitWindow(screenWidth, screenHeight, "Learning");
 
-    // NOTE: Textures must be loaded after window initialization (opengl context is required)
+    InitAudioDevice();
 
-    Image cat = LoadImage("resources/cat.png"); // Load image in RAM
-    ImageCrop(&cat, GetRectangle(100,10,280,380));
-    ImageFlipHorizontal(&cat);
-    ImageResize(&cat, 150, 200);
+    AttachAudioMixedProcessor(ProcessAudio);
 
-    Image parrots = LoadImage("resources/parrots.png");
+    Music music = LoadMusicStream("resources/country.mp3");
+    Sound sound = LoadSound("resources/coin.wav");
 
-    // Draw one image over the other with a scaling of 1.5f
-    ImageDraw(&parrots,
-              cat,
-              GetRectangle((float) cat.width, (float) cat.height),
-              GetRectangle(30, 40, cat.width * 1.5f, cat.height * 1.5f),
-              WHITE);
-    ImageCrop(&parrots, GetRectangle(0, 50, (float) parrots.width, (float) parrots.height - 100));
-
-    // Draw on the image witha few image draw methods
-    ImageDrawPixel(&parrots, 10, 10, RAYWHITE);
-    ImageDrawCircleLines(&parrots, 10, 10, 5, RAYWHITE);
-    ImageDrawRectangle(&parrots, 5, 20, 10, 10, RAYWHITE);
-
-    UnloadImage(cat); // Unload image from RAM
-
-    // Load custom font for drawing on image
-    Font font = LoadFont("resources/custom_jupiter_crash.png");
-
-    ImageDrawTextEx(&parrots, font, "PARROTS & CAT", GetVector2(300, 230), (float) font.baseSize, -2, WHITE);
-
-    UnloadFont(font);
-
-    Texture2D texture = LoadTextureFromImage(parrots); // Image converted to texture, uploaded to VRAM
-
-    UnloadImage(parrots); // Unload image from RAM
+    PlayMusicStream(music);
 
     SetTargetFPS(60);
 
     while (!WindowShouldClose())
     {
+        UpdateMusicStream(music);
+
+        if (IsKeyPressed(KEY_LEFT)) gExponent -= 0.05f;
+        if (IsKeyPressed(KEY_RIGHT)) gExponent += 0.05f;
+
+        if (gExponent <= 0.5f) gExponent = 0.5f;
+        if (gExponent >= 3.0f) gExponent = 3.0f;
+
+        if (IsKeyPressed(KEY_SPACE)) PlaySound(sound);
+
         BeginDrawing();
             ClearBackground(RAYWHITE);
     
-            DrawTexture(texture, screenWidth / 2 - texture.width / 2, screenHeight / 2 - texture.height / 2 - 40, WHITE);
-            DrawRectangleLines(screenWidth / 2 - texture.width / 2, screenHeight / 2 - texture.height / 2 - 40, texture.width, texture.height, DARKGRAY);
+            DrawText("MUSIC SHOULD BE PLAYING!", 255, 150, 20, LIGHTGRAY);
 
-            DrawText("We are drawing only one texture from various images composed!", 240, 350, 10, DARKGRAY);
-            DrawText("Source images have been cropped, scaled, flipped and copied one over the other.", 190, 370, 10, DARKGRAY);
+            DrawText(TextFormat("EXPONENT = %.2f", gExponent), 215, 180, 20, LIGHTGRAY);
+
+            DrawRectangle(199, 199, 402, 34, LIGHTGRAY);
+            for (int i = 0; i < 400; i++)
+            {
+                DrawLine(201 + i, (int) (232 - averageVolume[i] * 32), 201 + i, 232, MAROON);
+            }
+            DrawRectangleLines(199, 199, 402, 34, GRAY);
+
+            DrawText("PRESS SPACE TO PLAY OTHER SOUND", 200, 250, 20, LIGHTGRAY);
+            DrawText("USE LEFT AND RIGHT ARROWS TO ALTER DISTORTION", 140, 280, 20, LIGHTGRAY);
 
         EndDrawing();
     }
 
-    UnloadTexture(texture);
+    UnloadMusicStream(music); 
+
+    DetachAudioMixedProcessor(ProcessAudio);
+
+    CloseAudioDevice();
 
     CloseWindow();
 
